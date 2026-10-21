@@ -1,3 +1,3 @@
 **Brick-Breaker Game: Created using Cursor:**
 *Jungle-Themed*
-https://nile842ll.github.io/CursorPlay2/
+https://laurenlambrecht.github.io/CursorPlay2/
