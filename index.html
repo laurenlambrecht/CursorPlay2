@@ -12,7 +12,7 @@
       height: 100vh;
       overflow: hidden;
       font-family: 'Georgia', serif;
-      cursor: none;
+      cursor: auto;
       user-select: none;
     }
 
@@ -137,6 +137,8 @@
       position: absolute;
       inset: 0;
       z-index: 10;
+      touch-action: none;
+      cursor: crosshair;
     }
 
     /* ── HUD ── */
@@ -268,6 +270,12 @@
       75%  { transform: translate(-30px,-15px) rotate(8deg); }
       100% { transform: translate(0,0) rotate(0deg); }
     }
+
+    #game-message { position:fixed; top:23%;left:50%;transform:translateX(-50%);z-index:23;pointer-events:none;color:#fff;font:900 clamp(23px,4vw,44px) Georgia,serif;text-shadow:0 3px 1px #23551a,0 7px 20px #182f19;text-align:center;opacity:0;transition:opacity .2s;white-space:nowrap; }
+    #game-message.visible {opacity:1}
+    #pause-btn {display:none;position:fixed;top:88px;right:24px;z-index:24;padding:10px 15px;border-radius:12px;border:2px solid #326c26;background:#fff4bd;color:#273719;font-weight:800;cursor:pointer}
+    #pause-btn:focus-visible,#cta-btn:focus-visible{outline:4px solid #164bd6;outline-offset:4px}
+    @media (max-width:650px) {#score-box{top:12px;right:10px;font-size:.67rem;padding:7px}#score-box span{font-size:.92rem}#pause-btn{top:65px;right:10px}#title-block{top:95px}#title-block h1{font-size:1.7rem}#hint{white-space:normal;text-align:center;width:90%;bottom:125px;font-size:.79rem}#cta-btn{bottom:90px}}
   </style>
 </head>
 <body>
@@ -359,8 +367,10 @@
   </div>
 </div>
 
-<div id="score-box">BRICKS: <span id="score">0</span> &nbsp;|&nbsp; LIVES: <span id="lives-display">❤️❤️❤️</span></div>
-<div id="hint" style="display:none">Click anywhere to drop the ball!</div>
+<div id="score-box">LEVEL: <span id="level-display">1</span> &nbsp;|&nbsp; BRICKS: <span id="score">0</span> &nbsp;|&nbsp; LIVES: <span id="lives-display">❤️❤️❤️</span></div>
+<div id="hint" style="display:none">Move your mouse or drag to aim · ← → keys also work · P to pause</div>
+<div id="game-message" role="status" aria-live="polite"></div>
+<button id="pause-btn" type="button" aria-label="Pause game">Ⅱ Pause</button>
 <button id="cta-btn">Play Now</button>
 
 <!-- Butterflies -->
@@ -380,10 +390,10 @@
 
   // ── Constants ─────────────────────────────────────────────
   const BRICK_W   = 68, BRICK_H = 28, BRICK_GAP = 4;
-  const ROWS      = 4;
+  let ROWS      = 3;
   const GROUND_H  = 80;
   const BALL_R    = 14;
-  const BASE_SPD  = 7.5;
+  const BASE_SPD  = 6.2;
   // Fist hitbox ellipse radii
   const FIST_RX   = 38, FIST_RY = 28;
 
@@ -397,6 +407,36 @@
   let frame         = 0;
   let ballSpeed     = BASE_SPD;
   let brickCooldown = 0;
+  let level = 1;
+  let paused = false;
+  let transitioning = false;
+  let launchTimer = null;
+  const levelEl = document.getElementById('level-display');
+  const messageEl = document.getElementById('game-message');
+  const pauseBtn = document.getElementById('pause-btn');
+  const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+  function showMessage(text, ms=1200) {
+    messageEl.textContent = text;
+    messageEl.classList.add('visible');
+    if(showMessage.timer) clearTimeout(showMessage.timer);
+    if(ms) showMessage.timer=setTimeout(()=>messageEl.classList.remove('visible'),ms);
+  }
+  function updateLevel() {levelEl.textContent=level;ROWS=Math.min(3+level-1,7);}
+  function nextLevel() {
+    if(transitioning || !gameActive) return;
+    transitioning=true;ball.active=false;
+    level++;updateLevel();
+    if(level%3===0) {lives=Math.min(5,lives+1);updateLivesDisplay();}
+    showMessage('🌿 LEVEL '+level+'!',1450);
+    if(launchTimer)clearTimeout(launchTimer);
+    launchTimer=setTimeout(()=>{
+      if(!gameActive)return;
+      buildBricks();
+      ballSpeed=Math.min(BASE_SPD+level*.35,9.2);
+      transitioning=false;
+      launchBall();
+    },1500);
+  }
 
   const livesEl = document.getElementById('lives-display');
 
@@ -405,6 +445,7 @@
   }
 
   function loseLife() {
+    if(launchTimer) clearTimeout(launchTimer);
     lives--;
     updateLivesDisplay();
     if (lives <= 0) {
@@ -412,6 +453,8 @@
       gameActive  = false;
       // Show a game-over floater and re-show the play button after a delay
       addFloater(canvas.width / 2, canvas.height * 0.4, 'GAME OVER');
+      pauseBtn.style.display='none';
+      showMessage('GAME OVER',2200);
       setTimeout(() => {
         ctaBtn.style.display = '';
         ctaBtn.textContent   = 'Try Again';
@@ -420,19 +463,30 @@
       // Brief pause then relaunch
       ball.active = false;
       addFloater(canvas.width / 2, my - 60, `${lives} left!`);
-      setTimeout(launchBall, 900);
+      launchTimer=setTimeout(()=>{if(gameActive && !transitioning)launchBall();},950);
     }
   }
 
   // ── Mouse ─────────────────────────────────────────────────
-  let mx = 400;
-  // Fist is locked to a horizontal paddle lane above the bricks
-  const FIST_LANE_RATIO = 0.35; // 35% down the screen
-  let my = 0; // computed in resize and each frame
-
-  function updateFistLane() { my = canvas.height * FIST_LANE_RATIO; }
-
-  document.addEventListener('mousemove', e => { mx = e.clientX; });
+  let mx = window.innerWidth/2;
+  let targetX = mx;
+  let pointerSeen = false;
+  const FIST_LANE_RATIO = 0.34;
+  let my = 0;
+  let keyDir = 0;
+  function updateFistLane() {my=clamp(canvas.height*FIST_LANE_RATIO,130,canvas.height-240);}
+  function aim(x) {targetX=clamp(x,54,canvas.width-54);pointerSeen=true;}
+  document.addEventListener('pointermove', e => aim(e.clientX), {passive:true});
+  canvas.addEventListener('pointerdown', e => {aim(e.clientX);if(e.pointerType!=='mouse')canvas.setPointerCapture(e.pointerId);});
+  canvas.addEventListener('pointermove', e => {if(e.pointerType!=='mouse' || e.buttons)aim(e.clientX);});
+  document.addEventListener('keydown', e => {
+    if(['ArrowLeft','ArrowRight',' ','p','P'].includes(e.key))e.preventDefault();
+    if(e.key==='ArrowLeft')keyDir=-1;
+    if(e.key==='ArrowRight')keyDir=1;
+    if(e.key==='p'||e.key==='P'||e.key===' ') togglePause();
+  });
+  document.addEventListener('keyup',e=>{if((e.key==='ArrowLeft'&&keyDir<0)||(e.key==='ArrowRight'&&keyDir>0))keyDir=0;});
+  window.addEventListener('blur',()=>{if(gameActive&&!paused)togglePause();});
 
   // ── Fist squash/stretch state ─────────────────────────────
   let fistSX = 1, fistSY = 1, fistFlash = 0;
@@ -445,20 +499,24 @@
     canvas.width  = window.innerWidth;
     canvas.height = window.innerHeight;
     updateFistLane();
-    buildBricks();
+    if (!gameActive) buildBricks();
+    mx=clamp(mx,54,canvas.width-54);
+    targetX=clamp(targetX,54,canvas.width-54);
   }
   window.addEventListener('resize', resize);
 
   // ── Bricks ────────────────────────────────────────────────
   function buildBricks() {
     bricks = [];
-    const cols = Math.ceil(canvas.width / (BRICK_W + BRICK_GAP)) + 2;
+    const cols = Math.ceil(canvas.width / (BRICK_W + BRICK_GAP));
     for (let row = 0; row < ROWS; row++) {
       const offset = row % 2 === 0 ? 0 : (BRICK_W + BRICK_GAP) / 2;
       const y = canvas.height - GROUND_H - (row + 1) * (BRICK_H + BRICK_GAP);
-      for (let col = -1; col < cols; col++) {
+      for (let col = 0; col < cols; col++) {
+        const x=col * (BRICK_W + BRICK_GAP) - offset;
+        if(x >= canvas.width || x + BRICK_W <= 0)continue;
         bricks.push({
-          x: col * (BRICK_W + BRICK_GAP) - offset, y,
+          x, y,
           w: BRICK_W, h: BRICK_H,
           alive: true, hue: Math.random() * 20 - 10,
         });
@@ -711,7 +769,7 @@
   function checkFistHit() {
     const ex = FIST_RX + BALL_R, ey = FIST_RY + BALL_R;
     const dx = (ball.x - mx) / ex, dy = (ball.y - my) / ey;
-    if (dx*dx + dy*dy > 1) return false;
+    if(ball.vy<=0 || dx*dx + dy*dy > 1) return false;
 
     // Horizontal offset −1..1 maps to bounce angle
     const offset   = Math.max(-1, Math.min(1, (ball.x - mx) / FIST_RX));
@@ -771,8 +829,9 @@
     addFloater(best.x+best.w/2, best.y, '+10');
     spawnExplosion(best.x+best.w/2, best.y+best.h/2, brickCol(best, 45));
 
-    ballSpeed      = Math.min(ballSpeed * 1.05, BASE_SPD * 2.4);
-    brickCooldown  = 10;
+    ballSpeed      = Math.min(ballSpeed * 1.012, Math.min(10.5,BASE_SPD+level*.65));
+    brickCooldown  = 5;
+    if(!bricks.some(b=>b.alive))nextLevel();
     return true;
   }
 
@@ -780,11 +839,9 @@
   function updateBall() {
     if (!ball.active) return;
 
-    const steps = Math.max(1, Math.ceil(Math.hypot(ball.vx, ball.vy) / 8));
-    const svx = ball.vx/steps, svy = ball.vy/steps;
-
+    const steps = Math.max(1, Math.ceil(Math.hypot(ball.vx, ball.vy) / 5));
     for (let s = 0; s < steps; s++) {
-      ball.x += svx; ball.y += svy;
+      ball.x += ball.vx/steps; ball.y += ball.vy/steps;
 
       // Walls
       if (ball.x-BALL_R < 0)            { ball.x=BALL_R;              ball.vx= Math.abs(ball.vx); normSpeed(); }
@@ -800,6 +857,7 @@
       // Fist has priority over bricks
       if (checkFistHit()) break;
       if (checkBrickHit()) break;
+      if(!ball.active)break;
     }
 
     // Fire trail
@@ -813,14 +871,14 @@
 
   // ── Launch ball from fist position ────────────────────────
   function launchBall() {
-    ballSpeed  = BASE_SPD;
+    ballSpeed  = Math.min(BASE_SPD+(level-1)*.35,9.2);
     ball.active = true;
     ball.x = mx;
     ball.y = my + FIST_RY + BALL_R + 4;
 
     // Aim toward a random column in the brick wall, always downward
     const topBrickY = canvas.height - GROUND_H - ROWS*(BRICK_H+BRICK_GAP) - 20;
-    const tx = canvas.width * (.25 + Math.random()*.5);
+    const tx = clamp(mx+(Math.random()-.5)*canvas.width*.48,35,canvas.width-35);
     const ty = topBrickY;
     const dist = Math.hypot(tx-ball.x, ty-ball.y) || 1;
     ball.vx = (tx-ball.x)/dist * ballSpeed;
@@ -830,6 +888,9 @@
 
   // ── Fist animation decay ──────────────────────────────────
   function updateFist() {
+    if(keyDir) targetX=clamp(targetX+keyDir*11,54,canvas.width-54);
+    mx += (targetX-mx)*0.56;
+    if(Math.abs(targetX-mx)<.5)mx=targetX;
     fistSX   += (1-fistSX) * 0.22;
     fistSY   += (1-fistSY) * 0.22;
     fistFlash = Math.max(0, fistFlash - 0.08);
@@ -843,7 +904,9 @@
     ctaBtn.style.display = 'none';
     ctaBtn.textContent   = 'Play Now';
     hintEl.style.display = 'none';
-    bricks.forEach(b => { b.alive = true; });
+    if(launchTimer)clearTimeout(launchTimer);
+    level=1;updateLevel();buildBricks();
+    paused=false;transitioning=false;pauseBtn.textContent='Ⅱ Pause';pauseBtn.style.display='block';
     particles = []; floaters = [];
     score = 0; scoreEl.textContent = '0';
     lives = 3; updateLivesDisplay();
@@ -858,7 +921,7 @@
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     updateFistLane();
-    if (gameActive) updateBall();
+    if (gameActive && !paused && !transitioning) updateBall();
     updateFist();
     updateParticles();
     updateFloaters();
@@ -880,13 +943,26 @@
     if (ball.active) drawBall();
     particles.filter(p => p.type!=='trail'&&p.type!=='dust').forEach(drawParticle);
     drawFloaters();
-    drawFist(mx, my);   // always drawn last — replaces cursor
+    // Bright aiming ring means the fist is always locatable, even over foliage.
+    ctx.save();
+    ctx.beginPath();ctx.arc(mx,my,49,0,Math.PI*2);
+    ctx.strokeStyle='rgba(255,250,167,.96)';ctx.lineWidth=3;
+    ctx.setLineDash([6,7]);ctx.stroke();ctx.restore();
+    drawFist(mx, my);
 
     requestAnimationFrame(loop);
   }
 
+  function togglePause(){
+    if(!gameActive||transitioning)return;
+    paused=!paused;
+    pauseBtn.textContent=paused?'▶ Resume':'Ⅱ Pause';
+    if(paused)showMessage('PAUSED',0);
+    else messageEl.classList.remove('visible');
+  }
+  pauseBtn.addEventListener('click',togglePause);
   // ── Boot ──────────────────────────────────────────────────
-  resize();
+  updateLevel();resize();
   loop();
 })();
 </script>
