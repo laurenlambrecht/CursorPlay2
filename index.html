@@ -393,7 +393,7 @@
   let ROWS      = 3;
   const GROUND_H  = 80;
   const BALL_R    = 14;
-  const BASE_SPD  = 6.2;
+  const BASE_SPD  = 9.2;
   // Fist hitbox ellipse radii
   const FIST_RX   = 38, FIST_RY = 28;
 
@@ -432,7 +432,7 @@
     launchTimer=setTimeout(()=>{
       if(!gameActive)return;
       buildBricks();
-      ballSpeed=Math.min(BASE_SPD+level*.35,9.2);
+      ballSpeed=Math.min(BASE_SPD+(level-1)*.55,13);
       transitioning=false;
       launchBall();
     },1500);
@@ -673,7 +673,7 @@
 
   // ── Particles ─────────────────────────────────────────────
   function spawnExplosion(x, y, color) {
-    for (let i = 0; i < 32; i++) {
+    for (let i = 0; i < 12; i++) {
       const a = Math.random()*Math.PI*2, s = 2.5+Math.random()*7.5;
       particles.push({ x, y, vx:Math.cos(a)*s, vy:Math.sin(a)*s-3,
         r:3+Math.random()*6, life:1, decay:.022+Math.random()*.03,
@@ -681,7 +681,7 @@
     }
     particles.push({ x, y, vx:0, vy:0, r:0, life:1, decay:.055,
       color:'rgba(255,200,80,.9)', type:'ring', maxR:68 });
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 3; i++) {
       particles.push({ x:x+(Math.random()-.5)*32, y:y+(Math.random()-.5)*12,
         vx:(Math.random()-.5)*2, vy:-1-Math.random()*2.5,
         r:10+Math.random()*16, life:1, decay:.017+Math.random()*.013,
@@ -690,7 +690,7 @@
   }
 
   function spawnFistSpark(x, y) {
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 8; i++) {
       const a = -(Math.PI*.5)+(Math.random()-.5)*Math.PI, s = 4+Math.random()*7;
       particles.push({ x, y, vx:Math.cos(a)*s, vy:Math.sin(a)*s,
         r:2+Math.random()*4, life:.75, decay:.07+Math.random()*.05,
@@ -704,6 +704,7 @@
       p.life -= p.decay;
     });
     particles = particles.filter(p => p.life > 0);
+    if(particles.length>200)particles.splice(0,particles.length-200);
   }
 
   function drawParticle(p) {
@@ -769,7 +770,7 @@
   function checkFistHit() {
     const ex = FIST_RX + BALL_R, ey = FIST_RY + BALL_R;
     const dx = (ball.x - mx) / ex, dy = (ball.y - my) / ey;
-    if(ball.vy<=0 || dx*dx + dy*dy > 1) return false;
+    if(ball.vy>=0 || dx*dx + dy*dy > 1) return false;
 
     // Horizontal offset −1..1 maps to bounce angle
     const offset   = Math.max(-1, Math.min(1, (ball.x - mx) / FIST_RX));
@@ -778,7 +779,7 @@
 
     // Always deflect ball downward (toward bricks)
     ball.vx = Math.sin(ang) * ballSpeed;
-    ball.vy = Math.max(4, Math.cos(ang) * ballSpeed);
+    ball.vy = Math.max(6, Math.cos(ang) * ballSpeed);
 
     // Eject ball cleanly below fist
     ball.x = mx + Math.sin(ang) * (FIST_RX + BALL_R + 2);
@@ -829,7 +830,8 @@
     addFloater(best.x+best.w/2, best.y, '+10');
     spawnExplosion(best.x+best.w/2, best.y+best.h/2, brickCol(best, 45));
 
-    ballSpeed      = Math.min(ballSpeed * 1.012, Math.min(10.5,BASE_SPD+level*.65));
+    ballSpeed      = Math.min(ballSpeed * 1.008, Math.min(14,BASE_SPD+level*.7));
+    normSpeed();
     brickCooldown  = 5;
     if(!bricks.some(b=>b.alive))nextLevel();
     return true;
@@ -839,7 +841,7 @@
   function updateBall() {
     if (!ball.active) return;
 
-    const steps = Math.max(1, Math.ceil(Math.hypot(ball.vx, ball.vy) / 5));
+    const steps = Math.max(1, Math.ceil(Math.hypot(ball.vx, ball.vy) / 6));
     for (let s = 0; s < steps; s++) {
       ball.x += ball.vx/steps; ball.y += ball.vy/steps;
 
@@ -871,7 +873,7 @@
 
   // ── Launch ball from fist position ────────────────────────
   function launchBall() {
-    ballSpeed  = Math.min(BASE_SPD+(level-1)*.35,9.2);
+    ballSpeed  = Math.min(BASE_SPD+(level-1)*.55,13);
     ball.active = true;
     ball.x = mx;
     ball.y = my + FIST_RY + BALL_R + 4;
@@ -889,7 +891,7 @@
   // ── Fist animation decay ──────────────────────────────────
   function updateFist() {
     if(keyDir) targetX=clamp(targetX+keyDir*11,54,canvas.width-54);
-    mx += (targetX-mx)*0.56;
+    mx += (targetX-mx)*0.86;
     if(Math.abs(targetX-mx)<.5)mx=targetX;
     fistSX   += (1-fistSX) * 0.22;
     fistSY   += (1-fistSY) * 0.22;
@@ -939,9 +941,9 @@
       ctx.restore();
     }
 
-    particles.filter(p => p.type==='trail'||p.type==='dust').forEach(drawParticle);
+    for(const p of particles)if(p.type==='trail'||p.type==='dust')drawParticle(p);
     if (ball.active) drawBall();
-    particles.filter(p => p.type!=='trail'&&p.type!=='dust').forEach(drawParticle);
+    for(const p of particles)if(p.type!=='trail'&&p.type!=='dust')drawParticle(p);
     drawFloaters();
     // Bright aiming ring means the fist is always locatable, even over foliage.
     ctx.save();
