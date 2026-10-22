@@ -276,6 +276,19 @@
     #pause-btn {display:none;position:fixed;top:88px;right:24px;z-index:24;padding:10px 15px;border-radius:12px;border:2px solid #326c26;background:#fff4bd;color:#273719;font-weight:800;cursor:pointer}
     #pause-btn:focus-visible,#cta-btn:focus-visible{outline:4px solid #164bd6;outline-offset:4px}
     @media (max-width:650px) {#score-box{top:12px;right:10px;font-size:.67rem;padding:7px}#score-box span{font-size:.92rem}#pause-btn{top:65px;right:10px}#title-block{top:95px}#title-block h1{font-size:1.7rem}#hint{white-space:normal;text-align:center;width:90%;bottom:125px;font-size:.79rem}#cta-btn{bottom:90px}}
+  
+    #level-picker{position:fixed;inset:0;z-index:35;overflow:auto;display:flex;align-items:center;justify-content:center;padding:25px;background:linear-gradient(145deg,rgba(9,52,44,.95),rgba(10,84,53,.91))}
+    #level-picker[hidden]{display:none}
+    .picker-inner{width:min(950px,100%);text-align:center;color:#fff}
+    .picker-inner h2{font-size:clamp(2rem,5vw,3.8rem);text-shadow:0 5px 0 #16492a;margin-bottom:9px}
+    .picker-inner>p{color:#e4ffc8;margin-bottom:28px}
+    #level-tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:13px}
+    .level-tile{min-height:195px;display:flex;align-items:center;flex-direction:column;justify-content:center;gap:9px;border:3px solid #ffed91;border-radius:24px;background:linear-gradient(#faffde,#a7e478);box-shadow:0 7px 0 #2c763b,0 12px 28px #002a2550;color:#235228;cursor:pointer;font-family:inherit;transition:transform .16s}
+    .level-tile:hover:not(:disabled){transform:translateY(-5px)}.level-tile.locked{filter:saturate(.4);background:linear-gradient(#cbd5d5,#8faaa0);border-color:#bccdcc;opacity:.78;cursor:not-allowed}
+    .level-icon{font-size:3rem}.level-tile strong{font-size:1.13rem}.level-tile small{font-size:.84rem}.level-status{font-weight:900;font-size:.7rem;letter-spacing:.1em}
+    #levels-btn{position:fixed;left:20px;top:20px;z-index:27;background:#fff3b2;border:2px solid #3d8238;border-radius:10px;padding:10px 15px;cursor:pointer;font-weight:800}
+    #levels-btn[hidden]{display:none}
+    @media(max-width:760px){#level-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.level-tile{min-height:155px}.picker-inner{padding-top:30px}}
   </style>
 </head>
 <body>
@@ -371,7 +384,11 @@
 <div id="hint" style="display:none">Move your mouse or drag to aim · ← → keys also work · P to pause</div>
 <div id="game-message" role="status" aria-live="polite"></div>
 <button id="pause-btn" type="button" aria-label="Pause game">Ⅱ Pause</button>
-<button id="cta-btn">Play Now</button>
+<button id="cta-btn" style="display:none">Play Now</button>
+<button id="levels-btn" hidden type="button">← Levels</button>
+<section id="level-picker" aria-label="Choose a level">
+  <div class="picker-inner"><h2>🌴 JUNGLE QUEST</h2><p>Break through the magical blocks. Discover treasure. Unlock every level!</p><div id="level-tiles"></div></div>
+</section>
 
 <!-- Butterflies -->
 <div class="butterfly" style="top:38%;left:12%;animation-duration:6s;animation-delay:0s">🦋</div>
@@ -391,6 +408,14 @@
   // ── Constants ─────────────────────────────────────────────
   const BRICK_W   = 68, BRICK_H = 28, BRICK_GAP = 4;
   let ROWS      = 3;
+  const LEVELS=[
+    {name:'Treasure Grove',reward:'Emerald Chest',pattern:'arch',types:['gem','jelly','gold']},
+    {name:'Temple Vault',reward:'Golden Idol',pattern:'pillars',types:['stone','gem','gold']},
+    {name:'Gem Falls',reward:'Crystal Crown',pattern:'diamond',types:['jelly','gem','gold']},
+    {name:'Vine Ruins',reward:'Sunstone',pattern:'waves',types:['vine','stone','gem']},
+    {name:'Golden Canopy',reward:'Royal Hoard',pattern:'zigzag',types:['gold','jelly','stone','gem']}
+  ];
+  const theme=()=>LEVELS[(level-1)%LEVELS.length];
   const GROUND_H  = 80;
   const BALL_R    = 14;
   const BASE_SPD  = 9.2;
@@ -407,6 +432,36 @@
   let frame         = 0;
   let ballSpeed     = BASE_SPD;
   let brickCooldown = 0;
+  let treasureOpen=false;
+  let unlocked=1;
+  try{unlocked=Math.max(1,Math.min(LEVELS.length,Number(localStorage.getItem('jungle-quest-unlocked'))||1));}catch(e){}
+  const chooser=document.getElementById('level-picker');
+  const tiles=document.getElementById('level-tiles');
+  const chooserBtn=document.getElementById('levels-btn');
+  function showLevels(){
+    if(launchTimer)clearTimeout(launchTimer);
+    ball.active=false;gameActive=false;paused=false;transitioning=false;
+    pauseBtn.style.display='none';ctaBtn.style.display='none';
+    chooser.hidden=false;chooserBtn.hidden=true;
+    tiles.innerHTML='';
+    LEVELS.forEach((lv,i)=>{
+      const n=i+1,ok=n<=unlocked;
+      const b=document.createElement('button');
+      b.type='button';b.className='level-tile'+(ok?'':' locked');b.disabled=!ok;
+      b.innerHTML='<span class="level-icon">'+(ok?['💎','🏛️','👑','🌿','🏆'][i]:'🔒')+'</span><strong>LEVEL '+n+'</strong><small>'+lv.name+'</small><span class="level-status">'+(ok?'PLAY →':'LOCKED')+'</span>';
+      if(ok)b.addEventListener('click',()=>startGame(n));
+      tiles.appendChild(b);
+    });
+  }
+  function startGame(n){
+    if(launchTimer)clearTimeout(launchTimer);
+    chooser.hidden=true;chooserBtn.hidden=false;
+    ctaBtn.style.display='none';hintEl.style.display='none';
+    level=n;updateLevel();treasureOpen=false;buildBricks();
+    paused=false;transitioning=false;pauseBtn.textContent='Ⅱ Pause';pauseBtn.style.display='block';
+    particles=[];floaters=[];score=0;scoreEl.textContent='0';lives=3;updateLivesDisplay();
+    gameActive=true;showMessage('LEVEL '+level+': '+theme().name,1300);launchBall();
+  }
   let level = 1;
   let paused = false;
   let transitioning = false;
@@ -421,16 +476,29 @@
     if(showMessage.timer) clearTimeout(showMessage.timer);
     if(ms) showMessage.timer=setTimeout(()=>messageEl.classList.remove('visible'),ms);
   }
-  function updateLevel() {levelEl.textContent=level;ROWS=Math.min(3+level-1,7);}
+  function updateLevel() {levelEl.textContent=level;ROWS=Math.min(3+Math.floor((level-1)/2),6);}
   function nextLevel() {
     if(transitioning || !gameActive) return;
-    transitioning=true;ball.active=false;
+    transitioning=true;ball.active=false;treasureOpen=true;
+    spawnExplosion(canvas.width/2,canvas.height-GROUND_H-15,'#ffd66d');
+    if(level===LEVELS.length){
+      showMessage('🏆 ALL TREASURES FOUND!',2700);
+      gameActive=false;
+      pauseBtn.style.display='none';
+      launchTimer=setTimeout(showLevels,2800);
+      return;
+    }
+    if(level+1>unlocked){
+      unlocked=level+1;
+      try{localStorage.setItem('jungle-quest-unlocked',String(unlocked));}catch(e){}
+    }
     level++;updateLevel();
     if(level%3===0) {lives=Math.min(5,lives+1);updateLivesDisplay();}
-    showMessage('🌿 LEVEL '+level+'!',1450);
+    showMessage('✨ '+theme().name+' UNLOCKED!',1450);
     if(launchTimer)clearTimeout(launchTimer);
     launchTimer=setTimeout(()=>{
       if(!gameActive)return;
+      treasureOpen=false;
       buildBricks();
       ballSpeed=Math.min(BASE_SPD+(level-1)*.55,13);
       transitioning=false;
@@ -506,36 +574,82 @@
   window.addEventListener('resize', resize);
 
   // ── Bricks ────────────────────────────────────────────────
-  function buildBricks() {
-    bricks = [];
-    const cols = Math.ceil(canvas.width / (BRICK_W + BRICK_GAP));
-    for (let row = 0; row < ROWS; row++) {
-      const offset = row % 2 === 0 ? 0 : (BRICK_W + BRICK_GAP) / 2;
-      const y = canvas.height - GROUND_H - (row + 1) * (BRICK_H + BRICK_GAP);
-      for (let col = 0; col < cols; col++) {
-        const x=col * (BRICK_W + BRICK_GAP) - offset;
-        if(x >= canvas.width || x + BRICK_W <= 0)continue;
-        bricks.push({
-          x, y,
-          w: BRICK_W, h: BRICK_H,
-          alive: true, hue: Math.random() * 20 - 10,
-        });
+
+  function buildBricks(){
+    bricks=[];
+    const lv=theme();
+    const cols=Math.max(4,Math.floor((canvas.width-16)/(BRICK_W+BRICK_GAP)));
+    const total=cols*(BRICK_W+BRICK_GAP)-BRICK_GAP;
+    const left=(canvas.width-total)/2;
+    for(let row=0;row<ROWS;row++){
+      const y=canvas.height-GROUND_H-14-(row+1)*(BRICK_H+BRICK_GAP);
+      for(let col=0;col<cols;col++){
+        const d=Math.abs(col-(cols-1)/2);
+        let keep=true;
+        if(lv.pattern==='arch')keep=!(row===ROWS-1&&d>(cols-1)*.39);
+        if(lv.pattern==='pillars')keep=row===0||col%5!==2;
+        if(lv.pattern==='diamond')keep=d<=Math.max(2,(cols-1)/2-row*.5);
+        if(lv.pattern==='waves')keep=row===0||(col+Math.floor(row/2))%6!==0;
+        if(lv.pattern==='zigzag')keep=row===0||(col+row*2)%7!==0;
+        if(!keep)continue;
+        const kind=lv.types[(col+row*3+Math.floor(col/3))%lv.types.length];
+        bricks.push({x:left+col*(BRICK_W+BRICK_GAP),y,w:BRICK_W,h:BRICK_H,
+          alive:true,kind,hp:kind==='stone'?2:1,maxHp:kind==='stone'?2:1});
       }
     }
   }
-
-  function brickCol(b, l) { return `hsl(${15 + b.hue},65%,${l}%)`; }
-
-  function drawBrick(b) {
-    if (!b.alive) return;
-    const { x, y, w, h } = b;
-    ctx.fillStyle = brickCol(b, 45); ctx.fillRect(x, y, w, h);
-    ctx.fillStyle = brickCol(b, 60); ctx.fillRect(x, y, w, 5); ctx.fillRect(x, y, 4, h);
-    ctx.fillStyle = brickCol(b, 32); ctx.fillRect(x, y+h-5, w, 5); ctx.fillRect(x+w-4, y, 4, h);
-    ctx.strokeStyle = '#5a2a10'; ctx.lineWidth = 1;
-    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  function brickCol(b,l){
+    return {gem:'#25b9d4',jelly:'#fc6baf',gold:'#ffbf36',stone:'#89949f',vine:'#4bcf69'}[b.kind]||'#f0a35d';
   }
-
+  function drawBrick(b){
+    if(!b.alive)return;
+    const {x,y,w,h}=b;
+    const palette={
+      gem:['#075e93','#1bc9e4','#b6fdff'],
+      jelly:['#a92569','#fb68b7','#ffe0ec'],
+      gold:['#9b5912','#ffc94a','#fff3a5'],
+      stone:['#505969','#91a2b4','#e6edf5'],
+      vine:['#16733b','#5cda77','#c5ff9e']
+    }[b.kind];
+    ctx.save();
+    ctx.shadowColor='rgba(22,32,35,.33)';ctx.shadowBlur=3;ctx.shadowOffsetY=3;
+    ctx.fillStyle=palette[0];ctx.beginPath();ctx.roundRect(x+1,y+2,w-2,h-1,8);ctx.fill();
+    ctx.shadowColor='transparent';
+    const grad=ctx.createLinearGradient(x,y,x,y+h);
+    grad.addColorStop(0,palette[2]);grad.addColorStop(.3,palette[1]);grad.addColorStop(1,palette[0]);
+    ctx.fillStyle=grad;ctx.beginPath();ctx.roundRect(x+3,y+2,w-6,h-6,7);ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,.55)';ctx.beginPath();ctx.roundRect(x+9,y+5,w-18,5,3);ctx.fill();
+    ctx.font='bold 18px Georgia';ctx.fillStyle='rgba(255,255,255,.92)';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText({gem:'◆',jelly:'✿',gold:'★',stone:'⬡',vine:'❧'}[b.kind],x+w/2,y+h/2+2);
+    if(b.maxHp>1&&b.hp===1){
+      ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x+12,y+5);ctx.lineTo(x+w*.54,y+h-5);ctx.lineTo(x+w-13,y+7);ctx.stroke();
+    }
+    ctx.restore();
+  }
+  function drawTreasure(){
+    const x=canvas.width/2,y=canvas.height-GROUND_H+38;
+    ctx.save();
+    const glow=ctx.createRadialGradient(x,y,2,x,y,110);
+    glow.addColorStop(0,'rgba(255,240,100,.75)');glow.addColorStop(1,'rgba(255,220,55,0)');
+    ctx.fillStyle=glow;ctx.beginPath();ctx.arc(x,y,110,0,Math.PI*2);ctx.fill();
+    ctx.translate(x,y);
+    const scale=treasureOpen?1.3:1+Math.sin(frame*.045)*.035;
+    ctx.scale(scale,scale);
+    ctx.fillStyle='#74401d';ctx.strokeStyle='#47220b';ctx.lineWidth=4;
+    ctx.beginPath();ctx.roundRect(-43,-17,86,47,8);ctx.fill();ctx.stroke();
+    ctx.fillStyle='#d99023';ctx.beginPath();ctx.roundRect(-45,-35,90,29,[22,22,5,5]);ctx.fill();ctx.stroke();
+    ctx.fillStyle='#ffe06a';ctx.fillRect(-43,-2,86,8);ctx.fillRect(-7,-33,14,63);
+    ctx.fillStyle='#573312';ctx.beginPath();ctx.arc(0,9,5,0,Math.PI*2);ctx.fill();
+    if(treasureOpen){
+      ctx.fillStyle='#79f8ff';ctx.font='30px Georgia';ctx.textAlign='center';ctx.fillText('✦  ✦',0,-49);
+    }
+    ctx.restore();
+    ctx.save();ctx.textAlign='center';ctx.font='bold 12px Georgia';ctx.fillStyle='#fff';
+    ctx.shadowColor='#16400b';ctx.shadowBlur=7;
+    ctx.fillText(treasureOpen?'TREASURE FOUND!':'BREAK THROUGH TO THE TREASURE!',x,canvas.height-10);
+    ctx.restore();
+  }
   // ── Ball rendering ────────────────────────────────────────
   function drawBall() {
     const { x, y } = ball, r = BALL_R;
@@ -823,9 +937,15 @@
     }
     normSpeed();
 
-    // Destroy
-    best.alive = false;
-    score += 10;
+    // Durable stone blocks crack on the first hit.
+    best.hp--;
+    if(best.hp>0){
+      spawnFistSpark(best.x+best.w/2,best.y+best.h/2);
+      brickCooldown=4;
+      return true;
+    }
+    best.alive=false;
+    score += best.kind==='gold'?25:10;
     scoreEl.textContent = score;
     addFloater(best.x+best.w/2, best.y, '+10');
     spawnExplosion(best.x+best.w/2, best.y+best.h/2, brickCol(best, 45));
@@ -928,6 +1048,7 @@
     updateParticles();
     updateFloaters();
 
+    drawTreasure();
     bricks.forEach(drawBrick);
 
     // Paddle lane track line
@@ -964,7 +1085,9 @@
   }
   pauseBtn.addEventListener('click',togglePause);
   // ── Boot ──────────────────────────────────────────────────
+  chooserBtn.addEventListener('click',showLevels);
   updateLevel();resize();
+  showLevels();
   loop();
 })();
 </script>
