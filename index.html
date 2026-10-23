@@ -433,6 +433,7 @@
   let ballSpeed     = BASE_SPD;
   let brickCooldown = 0;
   let treasureOpen=false;
+  let lastFrameTime=0;
   let unlocked=1;
   try{unlocked=Math.max(1,Math.min(LEVELS.length,Number(localStorage.getItem('jungle-quest-unlocked'))||1));}catch(e){}
   const chooser=document.getElementById('level-picker');
@@ -480,6 +481,7 @@
   function nextLevel() {
     if(transitioning || !gameActive) return;
     transitioning=true;ball.active=false;treasureOpen=true;
+    showMessage('🏆 LEVEL '+level+' COMPLETE — '+theme().reward+' FOUND!',2600);
     spawnExplosion(canvas.width/2,canvas.height-GROUND_H-15,'#ffd66d');
     if(level===LEVELS.length){
       showMessage('🏆 ALL TREASURES FOUND!',2700);
@@ -494,7 +496,8 @@
     }
     level++;updateLevel();
     if(level%3===0) {lives=Math.min(5,lives+1);updateLivesDisplay();}
-    showMessage('✨ '+theme().name+' UNLOCKED!',1450);
+    score+=100*level;scoreEl.textContent=score;
+    showMessage('🏆 LEVEL COMPLETE! '+theme().reward+' FOUND! +'+(100*level)+' BONUS',2600);
     if(launchTimer)clearTimeout(launchTimer);
     launchTimer=setTimeout(()=>{
       if(!gameActive)return;
@@ -503,7 +506,7 @@
       ballSpeed=Math.min(BASE_SPD+(level-1)*.55,13);
       transitioning=false;
       launchBall();
-    },1500);
+    },2800);
   }
 
   const livesEl = document.getElementById('lives-display');
@@ -564,12 +567,14 @@
 
   // ── Canvas resize ─────────────────────────────────────────
   function resize() {
+    const oldW=canvas.width,oldH=canvas.height;
     canvas.width  = window.innerWidth;
     canvas.height = window.innerHeight;
     updateFistLane();
     if (!gameActive) buildBricks();
     mx=clamp(mx,54,canvas.width-54);
     targetX=clamp(targetX,54,canvas.width-54);
+    if(gameActive && oldW && oldH){ball.x=clamp(ball.x*canvas.width/oldW,BALL_R,canvas.width-BALL_R);ball.y=clamp(ball.y*canvas.height/oldH,BALL_R,canvas.height-BALL_R);buildBricks();}
   }
   window.addEventListener('resize', resize);
 
@@ -893,10 +898,10 @@
 
     // Always deflect ball downward (toward bricks)
     ball.vx = Math.sin(ang) * ballSpeed;
-    ball.vy = Math.max(6, Math.cos(ang) * ballSpeed);
+    ball.vy = Math.cos(ang) * ballSpeed;
 
     // Eject ball cleanly below fist
-    ball.x = mx + Math.sin(ang) * (FIST_RX + BALL_R + 2);
+    ball.x = clamp(ball.x, BALL_R, canvas.width-BALL_R);
     ball.y = my + (FIST_RY + BALL_R + 3);
 
     fistSX = 1.4; fistSY = 0.65; fistFlash = 1;
@@ -932,7 +937,7 @@
       ball.x  = cx + (dx>0?1:-1)*(best.w*.5+BALL_R+1);
     } else {
       // Top / bottom hit — always send ball back toward fist (upward)
-      ball.vy = -Math.abs(ball.vy);
+      ball.vy = dy>0 ? Math.abs(ball.vy) : -Math.abs(ball.vy);
       ball.y  = cy + (dy>0?1:-1)*(best.h*.5+BALL_R+1);
     }
     normSpeed();
@@ -947,7 +952,7 @@
     best.alive=false;
     score += best.kind==='gold'?25:10;
     scoreEl.textContent = score;
-    addFloater(best.x+best.w/2, best.y, '+10');
+    addFloater(best.x+best.w/2, best.y, best.kind==='gold'?'+25':'+10');
     spawnExplosion(best.x+best.w/2, best.y+best.h/2, brickCol(best, 45));
 
     ballSpeed      = Math.min(ballSpeed * 1.008, Math.min(14,BASE_SPD+level*.7));
@@ -958,12 +963,12 @@
   }
 
   // ── Ball update (sub-stepped CCD) ────────────────────────
-  function updateBall() {
+  function updateBall(dt=1) {
     if (!ball.active) return;
 
-    const steps = Math.max(1, Math.ceil(Math.hypot(ball.vx, ball.vy) / 6));
+    const steps = Math.max(1, Math.ceil(Math.hypot(ball.vx, ball.vy)*dt / 3));
     for (let s = 0; s < steps; s++) {
-      ball.x += ball.vx/steps; ball.y += ball.vy/steps;
+      ball.x += ball.vx*dt/steps; ball.y += ball.vy*dt/steps;
 
       // Walls
       if (ball.x-BALL_R < 0)            { ball.x=BALL_R;              ball.vx= Math.abs(ball.vx); normSpeed(); }
@@ -972,13 +977,15 @@
 
       // Ball flew above the fist lane = out of bounds, lose a life
       if (ball.y + BALL_R < my - FIST_RY - 10) { loseLife(); return; }
+      const floorY=canvas.height-GROUND_H-BALL_R;
+      if(ball.y>floorY){ball.y=floorY;ball.vy=-Math.abs(ball.vy);normSpeed();}
 
       // Ball fell below the screen (shouldn't normally happen)
       if (ball.y > canvas.height + 60) { loseLife(); return; }
 
       // Fist has priority over bricks
-      if (checkFistHit()) break;
-      if (checkBrickHit()) break;
+      if (checkFistHit()) continue;
+      if (checkBrickHit()) continue;
       if(!ball.active)break;
     }
 
@@ -1027,7 +1034,7 @@
     ctaBtn.textContent   = 'Play Now';
     hintEl.style.display = 'none';
     if(launchTimer)clearTimeout(launchTimer);
-    level=1;updateLevel();buildBricks();
+    level=1;updateLevel();treasureOpen=false;buildBricks();
     paused=false;transitioning=false;pauseBtn.textContent='Ⅱ Pause';pauseBtn.style.display='block';
     particles = []; floaters = [];
     score = 0; scoreEl.textContent = '0';
@@ -1038,12 +1045,14 @@
   });
 
   // ── Main loop ─────────────────────────────────────────────
-  function loop() {
+  function loop(timestamp=0) {
     frame++;
+    const dt=lastFrameTime?Math.min(2,(timestamp-lastFrameTime)/16.6667):1;
+    lastFrameTime=timestamp;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     updateFistLane();
-    if (gameActive && !paused && !transitioning) updateBall();
+    if (gameActive && !paused && !transitioning) updateBall(dt);
     updateFist();
     updateParticles();
     updateFloaters();
