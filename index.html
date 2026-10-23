@@ -376,11 +376,11 @@
 <div id="hud">
   <div id="title-block">
     <h1>🗺️ JUNGLE QUEST</h1>
-    <p>An Interactive Map Adventure</p>
+    <p>Break the temple gate. Claim the treasure.</p>
   </div>
 </div>
 
-<div id="score-box">LEVEL: <span id="level-display">1</span> &nbsp;|&nbsp; BRICKS: <span id="score">0</span> &nbsp;|&nbsp; LIVES: <span id="lives-display">❤️❤️❤️</span></div>
+<div id="score-box">LEVEL: <span id="level-display">1</span> &nbsp;|&nbsp; POINTS: <span id="score">0</span> &nbsp;|&nbsp; LIVES: <span id="lives-display">❤️❤️❤️</span></div>
 <div id="hint" style="display:none">Move your mouse or drag to aim · ← → keys also work · P to pause</div>
 <div id="game-message" role="status" aria-live="polite"></div>
 <button id="pause-btn" type="button" aria-label="Pause game">Ⅱ Pause</button>
@@ -433,6 +433,7 @@
   let ballSpeed     = BASE_SPD;
   let brickCooldown = 0;
   let treasureOpen=false;
+  let gateOpened=false;
   let lastFrameTime=0;
   let unlocked=1;
   try{unlocked=Math.max(1,Math.min(LEVELS.length,Number(localStorage.getItem('jungle-quest-unlocked'))||1));}catch(e){}
@@ -458,10 +459,10 @@
     if(launchTimer)clearTimeout(launchTimer);
     chooser.hidden=true;chooserBtn.hidden=false;
     ctaBtn.style.display='none';hintEl.style.display='none';
-    level=n;updateLevel();treasureOpen=false;buildBricks();
+    level=n;updateLevel();treasureOpen=false;gateOpened=false;buildBricks();
     paused=false;transitioning=false;pauseBtn.textContent='Ⅱ Pause';pauseBtn.style.display='block';
     particles=[];floaters=[];score=0;scoreEl.textContent='0';lives=3;updateLivesDisplay();
-    gameActive=true;showMessage('LEVEL '+level+': '+theme().name,1300);launchBall();
+    gameActive=true;showMessage('LEVEL '+level+': BREAK THE CENTER GATE!',1900);launchBall();
   }
   let level = 1;
   let paused = false;
@@ -501,7 +502,7 @@
     if(launchTimer)clearTimeout(launchTimer);
     launchTimer=setTimeout(()=>{
       if(!gameActive)return;
-      treasureOpen=false;
+      treasureOpen=false;gateOpened=false;
       buildBricks();
       ballSpeed=Math.min(BASE_SPD+(level-1)*.55,13);
       transitioning=false;
@@ -580,28 +581,31 @@
 
   // ── Bricks ────────────────────────────────────────────────
 
+  // A stepped jungle temple: break the central seal to expose the treasure.
+  // Side pillars are optional bonus points, not mandatory cleanup.
   function buildBricks(){
     bricks=[];
     const lv=theme();
-    const cols=Math.max(4,Math.floor((canvas.width-16)/(BRICK_W+BRICK_GAP)));
-    const total=cols*(BRICK_W+BRICK_GAP)-BRICK_GAP;
-    const left=(canvas.width-total)/2;
-    for(let row=0;row<ROWS;row++){
-      const y=canvas.height-GROUND_H-14-(row+1)*(BRICK_H+BRICK_GAP);
+    const cols=Math.max(5,Math.min(11,Math.floor((canvas.width-24)/(BRICK_W+BRICK_GAP))));
+    const gap=BRICK_GAP;
+    const width=cols*(BRICK_W+gap)-gap;
+    const left=(canvas.width-width)/2;
+    const center=(cols-1)/2;
+    const rows=Math.min(5,3+Math.floor((level-1)/2));
+    const base=canvas.height-GROUND_H-20;
+    for(let row=0;row<rows;row++){
       for(let col=0;col<cols;col++){
-        const d=Math.abs(col-(cols-1)/2);
-        let keep=true;
-        if(lv.pattern==='arch')keep=!(row===ROWS-1&&d>(cols-1)*.39);
-        if(lv.pattern==='pillars')keep=row===0||col%5!==2;
-        if(lv.pattern==='diamond')keep=d<=Math.max(2,(cols-1)/2-row*.5);
-        if(lv.pattern==='waves')keep=row===0||(col+Math.floor(row/2))%6!==0;
-        if(lv.pattern==='zigzag')keep=row===0||(col+row*2)%7!==0;
-        if(!keep)continue;
-        const kind=lv.types[(col+row*3+Math.floor(col/3))%lv.types.length];
-        bricks.push({x:left+col*(BRICK_W+BRICK_GAP),y,w:BRICK_W,h:BRICK_H,
-          alive:true,kind,hp:kind==='stone'?2:1,maxHp:kind==='stone'?2:1});
+        const d=Math.abs(col-center);
+        // Terraced silhouette, symmetrical stone towers and a central gate.
+        if(d>center-Math.max(0,row-1)*.7)continue;
+        const gate=Math.abs(col-center)<1.15 && row<=1;
+        const kind=gate?'stone':(row===rows-1?'gold':lv.types[(col+row*3)%lv.types.length]);
+        const hp=gate?Math.min(3,1+Math.floor(level/2)):kind==='stone'?2:1;
+        bricks.push({x:left+col*(BRICK_W+gap),y:base-(row+1)*(BRICK_H+gap),
+          w:BRICK_W,h:BRICK_H,alive:true,kind,hp,maxHp:hp,gate});
       }
     }
+    gateOpened=false;
   }
   function brickCol(b,l){
     return {gem:'#25b9d4',jelly:'#fc6baf',gold:'#ffbf36',stone:'#89949f',vine:'#4bcf69'}[b.kind]||'#f0a35d';
@@ -652,7 +656,7 @@
     ctx.restore();
     ctx.save();ctx.textAlign='center';ctx.font='bold 12px Georgia';ctx.fillStyle='#fff';
     ctx.shadowColor='#16400b';ctx.shadowBlur=7;
-    ctx.fillText(treasureOpen?'TREASURE FOUND!':'BREAK THROUGH TO THE TREASURE!',x,canvas.height-10);
+    ctx.fillText(treasureOpen?'TREASURE FOUND!':gateOpened?'HIT THE CHEST TO WIN!':'BREAK THE CENTER GATE!',x,canvas.height-10);
     ctx.restore();
   }
   // ── Ball rendering ────────────────────────────────────────
@@ -958,7 +962,11 @@
     ballSpeed      = Math.min(ballSpeed * 1.008, Math.min(14,BASE_SPD+level*.7));
     normSpeed();
     brickCooldown  = 5;
-    if(!bricks.some(b=>b.alive))nextLevel();
+    if(best.gate && !bricks.some(b=>b.alive && b.gate)){
+      gateOpened=true;
+      showMessage('🔓 GATE OPEN! HIT THE TREASURE CHEST!',2200);
+      spawnExplosion(canvas.width/2,canvas.height-GROUND_H+15,'#ffe86b');
+    }
     return true;
   }
 
@@ -975,8 +983,9 @@
       if (ball.x+BALL_R > canvas.width) { ball.x=canvas.width-BALL_R; ball.vx=-Math.abs(ball.vx); normSpeed(); }
       if (ball.y-BALL_R < 0)            { ball.y=BALL_R;              ball.vy= Math.abs(ball.vy); normSpeed(); }
 
-      // Ball flew above the fist lane = out of bounds, lose a life
-      if (ball.y + BALL_R < my - FIST_RY - 10) { loseLife(); return; }
+      // A missed upward-moving ball costs a life only when it passes the fist.
+      // Reaching the top boundary itself never costs a life.
+      if(ball.vy<0 && ball.y < my-FIST_RY-BALL_R-4){loseLife();return;}
       const floorY=canvas.height-GROUND_H-BALL_R;
       if(ball.y>floorY){ball.y=floorY;ball.vy=-Math.abs(ball.vy);normSpeed();}
 
@@ -986,6 +995,9 @@
       // Fist has priority over bricks
       if (checkFistHit()) continue;
       if (checkBrickHit()) continue;
+      // The treasure is a physical target, not a requirement to clear every brick.
+      if(gateOpened && ball.vy>0 && Math.abs(ball.x-canvas.width/2)<58 &&
+         ball.y+BALL_R>=canvas.height-GROUND_H+4){nextLevel();return;}
       if(!ball.active)break;
     }
 
@@ -1034,7 +1046,7 @@
     ctaBtn.textContent   = 'Play Now';
     hintEl.style.display = 'none';
     if(launchTimer)clearTimeout(launchTimer);
-    level=1;updateLevel();treasureOpen=false;buildBricks();
+    level=1;updateLevel();treasureOpen=false;gateOpened=false;buildBricks();
     paused=false;transitioning=false;pauseBtn.textContent='Ⅱ Pause';pauseBtn.style.display='block';
     particles = []; floaters = [];
     score = 0; scoreEl.textContent = '0';
